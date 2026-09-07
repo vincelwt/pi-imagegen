@@ -13,6 +13,7 @@
   ],
   "files": [
     "imagegen.ts",
+    "subscriptions.ts",
     "README.md"
   ],
   "repository": {
@@ -23,6 +24,9 @@
     "url": "https://github.com/Jon-Vii/pi-imagegen/issues"
   },
   "homepage": "https://github.com/Jon-Vii/pi-imagegen#readme",
+  "scripts": {
+    "test": "node --experimental-strip-types --test tests/*.test.ts"
+  },
   "peerDependencies": {
     "@mariozechner/pi-ai": "*",
     "@mariozechner/pi-coding-agent": "*",

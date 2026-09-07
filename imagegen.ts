@@ -17,8 +17,8 @@ import { StringEnum } from "@mariozechner/pi-ai";
 import { type ExtensionAPI, type ExtensionContext, getAgentDir, withFileMutationQueue } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { type Static, Type } from "typebox";
+import { isSubscriptionProvider, requestWithSubscriptionFallback, type SubscriptionContext } from "./subscriptions.ts";
 
-const PROVIDER = "openai-codex";
 const CODEX_BASE_URL = "https://chatgpt.com/backend-api";
 const DEFAULT_RESPONSE_MODEL = "gpt-5.5";
 const IMAGE_MODEL = "gpt-image-2";
@@ -121,28 +121,6 @@ interface ImagegenDetails {
 	background: string;
 	outputFormat: string;
 	thinking: string;
-}
-
-interface CodexAccountClaims {
-	"https://api.openai.com/auth"?: {
-		chatgpt_account_id?: string;
-	};
-}
-
-function decodeJwtPayload(token: string): CodexAccountClaims {
-	const parts = token.split(".");
-	if (parts.length < 2) {
-		throw new Error("OpenAI Codex OAuth access token is not a JWT.");
-	}
-	return JSON.parse(Buffer.from(parts[1]!, "base64url").toString("utf8")) as CodexAccountClaims;
-}
-
-function getAccountId(token: string): string {
-	const accountId = decodeJwtPayload(token)["https://api.openai.com/auth"]?.chatgpt_account_id;
-	if (!accountId) {
-		throw new Error("Could not find chatgpt_account_id in OpenAI Codex OAuth token.");
-	}
-	return accountId;
 }
 
 function mimeFromFormat(format: string): string {
@@ -449,10 +427,8 @@ async function parseSseForImage(response: Response, signal?: AbortSignal) {
 	throw new Error("No image_generation_call result returned by Codex.");
 }
 
-type ImagegenContext = {
+type ImagegenContext = SubscriptionContext & {
 	cwd: string;
-	model?: { provider: string; id: string };
-	modelRegistry: { getApiKeyForProvider: (provider: string) => Promise<string | undefined> };
 };
 
 type ToolUpdate = (result: { content: Array<{ type: "text"; text: string }>; details?: unknown }) => void;
@@ -464,44 +440,34 @@ async function generateImage(
 	ctx: ImagegenContext,
 	extraMetadata: Partial<Pick<ImagegenMetadata, "batchId" | "batchPrompt" | "batchIndex" | "batchCount" | "referenceImageIds" | "referencePaths">> = {},
 ) {
-	const token = await ctx.modelRegistry.getApiKeyForProvider(PROVIDER);
-	if (!token) {
-		throw new Error("Missing OpenAI Codex OAuth credentials. Run /login and select OpenAI ChatGPT Plus/Pro (Codex).");
-	}
-
-	const accountId = getAccountId(token);
-	const responseModel = ctx.model?.provider === PROVIDER ? ctx.model.id : DEFAULT_RESPONSE_MODEL;
+	const responseModel = ctx.model && isSubscriptionProvider(ctx.model.provider) ? ctx.model.id : DEFAULT_RESPONSE_MODEL;
 	const sessionId = randomUUID();
 	const body = await buildRequest(params, responseModel, sessionId);
 	const outputFormat = params.outputFormat ?? "png";
 	const mimeType = mimeFromFormat(outputFormat);
 
-	onUpdate?.({
-		content: [{ type: "text", text: `Requesting image from ${PROVIDER}/${IMAGE_MODEL}...` }],
-		details: { provider: PROVIDER, imageModel: IMAGE_MODEL, responseModel },
-	});
-
-	const response = await fetch(`${CODEX_BASE_URL}/codex/responses`, {
-		method: "POST",
-		headers: {
-			Authorization: `Bearer ${token}`,
-			"chatgpt-account-id": accountId,
-			originator: "pi-imagegen-extension",
-			"OpenAI-Beta": "responses=experimental",
-			accept: "text/event-stream",
-			"content-type": "application/json",
-			session_id: sessionId,
-			"x-client-request-id": sessionId,
-			"User-Agent": `pi-imagegen-extension (${process.platform}; ${process.arch})`,
-		},
-		body: JSON.stringify(body),
-		signal,
-	});
-
-	if (!response.ok) {
-		const errorText = await response.text();
-		throw new Error(`Codex image request failed (${response.status}): ${errorText}`);
-	}
+	const { response, provider } = await requestWithSubscriptionFallback(ctx, ({ provider, token, accountId }) => {
+		onUpdate?.({
+			content: [{ type: "text", text: `Requesting image from ${provider}/${IMAGE_MODEL}...` }],
+			details: { provider, imageModel: IMAGE_MODEL, responseModel },
+		});
+		return fetch(`${CODEX_BASE_URL}/codex/responses`, {
+			method: "POST",
+			headers: {
+				Authorization: `Bearer ${token}`,
+				"chatgpt-account-id": accountId,
+				originator: "pi-imagegen-extension",
+				"OpenAI-Beta": "responses=experimental",
+				accept: "text/event-stream",
+				"content-type": "application/json",
+				session_id: sessionId,
+				"x-client-request-id": sessionId,
+				"User-Agent": `pi-imagegen-extension (${process.platform}; ${process.arch})`,
+			},
+			body: JSON.stringify(body),
+			signal,
+		});
+	}, signal);
 
 	const image = await parseSseForImage(response, signal);
 	const savedPath = resolveOutputPath(params.outputPath, ctx.cwd, image.id, outputFormat);
@@ -512,7 +478,7 @@ async function generateImage(
 	const metadata: ImagegenMetadata = {
 		createdAt,
 		prompt: params.prompt,
-		provider: PROVIDER,
+		provider,
 		responseModel,
 		imageModel: IMAGE_MODEL,
 		imageId: image.id,
@@ -532,7 +498,7 @@ async function generateImage(
 	const details: ImagegenDetails = metadata;
 
 	const text = [
-		`Generated image with ${PROVIDER}/${IMAGE_MODEL}.`,
+		`Generated image with ${provider}/${IMAGE_MODEL}.`,
 		`Saved to: ${savedPath}`,
 		image.revisedPrompt ? `Revised prompt: ${image.revisedPrompt}` : undefined,
 	]

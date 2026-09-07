@@ -10,6 +10,7 @@ A [Pi](https://pi.dev) package for generating images with your existing OpenAI/C
 ## What it does
 
 - Generates images through Pi's existing `openai-codex` OAuth login.
+- Falls back to other registered subscription accounts when one returns a quota limit.
 - Uses the Codex Responses backend with native `gpt-image-2` image generation.
 - Saves images and sidecar metadata locally.
 - Supports batches, style presets, reference images, and sketch references.
@@ -134,6 +135,31 @@ with the native Responses image generation tool:
 ```
 
 Generated image results are received from streamed SSE events and saved locally.
+
+### Multiple subscriptions
+
+If your Pi setup registers extra subscription providers (`openai-codex-alt`,
+`openai-codex-2`, `openai-codex-3`, and so on), image generation discovers them
+through the model registry. The selected subscription provider is tried first,
+then the primary and remaining registered accounts. Authentication is resolved
+through Pi for each attempt, including normal OAuth refresh. The package does
+not read or copy credential files and never falls back to a paid API key.
+
+An initial HTTP 429 advances to the next distinct subscription, at most once per
+account. Missing or unrefreshable credentials are skipped. Network errors,
+other HTTP failures, cancellation, and failures after streaming starts are not
+replayed, since generation may already have started. If every usable account
+is limited, the tool reports pool exhaustion. Saved metadata identifies the
+provider that actually generated the image. This applies to the tool, commands,
+batches, and studio, without changing the conversation's selected model.
+
+### Tests
+
+With Node.js 22.6 or newer:
+
+```sh
+npm test
+```
 
 ## Files and metadata
 
