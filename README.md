@@ -11,7 +11,7 @@ A [Pi](https://pi.dev) package for generating images with your existing OpenAI/C
 
 - Generates images through Pi's existing `openai-codex` OAuth login.
 - Falls back to other registered subscription accounts when one returns a quota limit.
-- Uses the Codex Responses backend with native `gpt-image-2` image generation.
+- Uses the Codex Responses backend with native GPT Image 2.5 generation (`gpt-image-2.5-flare` by default, `gpt-image-2.5-sunburst` for tighter edits).
 - Saves images and sidecar metadata locally.
 - Supports batches, style presets, reference images, and sketch references.
 - Provides a browser-based studio for browsing, comparing, rerunning, varying, and referencing images.
@@ -52,8 +52,8 @@ Select the ChatGPT/Codex option that provides the `openai-codex` provider.
 
 ```txt
 /img studio
-/img gen [--thinking off|minimal|low|medium|high] [--style name] <prompt>
-/img batch <count> [--thinking off|minimal|low|medium|high] [--style name] <prompt>
+/img gen [--model flare|sunburst|gpt-image-2] [--thinking off|minimal|low|medium|high] [--style name] <prompt>
+/img batch <count> [--model flare|sunburst|gpt-image-2] [--thinking off|minimal|low|medium|high] [--style name] <prompt>
 /img styles
 /img list [count]
 /img open [latest|number|path]
@@ -66,6 +66,7 @@ Examples:
 
 ```txt
 /img gen tiny blue ceramic fish on white background
+/img gen --model sunburst --quality high a product shot of a ceramic cup
 /img gen --thinking off --style poster a cinematic expedition poster for a lava cavern
 /img batch 4 --style wallpaper a quiet mountain observatory at sunrise
 /img studio
@@ -86,7 +87,7 @@ It supports:
 - image history wall
 - grouped batch/contact-sheet view
 - modal preview with rerun/vary/reference actions
-- prompt composer with style, aspect, quality, thinking, and count controls
+- prompt composer with model, style, aspect, quality, thinking, and count controls
 - real image references sent as `input_image` content
 - sketch references via a simple drawing canvas
 
@@ -107,8 +108,9 @@ imagegen
 It can generate an image and return both a saved file and an inline image attachment. It supports options such as:
 
 - `prompt`
+- `imageModel` (`gpt-image-2.5-flare`, `gpt-image-2.5-sunburst`, or `gpt-image-2`)
 - `size`
-- `quality`
+- `quality` (`auto`, `low`, `medium`, `high`, `xhigh`, `max`)
 - `background`
 - `outputFormat`
 - `thinking`
@@ -130,7 +132,7 @@ with the native Responses image generation tool:
 ```json
 {
   "type": "image_generation",
-  "model": "gpt-image-2"
+  "model": "gpt-image-2.5-flare"
 }
 ```
 

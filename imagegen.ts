@@ -3,7 +3,7 @@
  *
  * Registers `imagegen`, a custom tool that uses pi's existing openai-codex
  * OAuth credentials to call the Codex Responses backend with the native
- * `image_generation` tool (`gpt-image-2`).
+ * `image_generation` tool (`gpt-image-2.5-flare` by default).
  */
 
 import { Buffer } from "node:buffer";
@@ -17,14 +17,13 @@ import { StringEnum } from "@mariozechner/pi-ai";
 import { type ExtensionAPI, type ExtensionContext, getAgentDir, withFileMutationQueue } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { type Static, Type } from "typebox";
+import { IMAGE_MODELS, QUALITIES, isImageQuality, resolveImageModel } from "./models.ts";
 import { isSubscriptionProvider, requestWithSubscriptionFallback, type SubscriptionContext } from "./subscriptions.ts";
 
 const CODEX_BASE_URL = "https://chatgpt.com/backend-api";
 const DEFAULT_RESPONSE_MODEL = "gpt-5.5";
-const IMAGE_MODEL = "gpt-image-2";
 
 const SIZES = ["auto", "1024x1024", "1536x1024", "1024x1536"] as const;
-const QUALITIES = ["auto", "low", "medium", "high"] as const;
 const BACKGROUNDS = ["auto", "opaque", "transparent"] as const;
 const OUTPUT_FORMATS = ["png", "webp", "jpeg"] as const;
 const THINKING_MODES = ["off", "minimal", "low", "medium", "high"] as const;
@@ -57,6 +56,12 @@ const STYLE_PRESETS: Record<string, Partial<ToolParams> & { suffix: string }> = 
 
 const TOOL_PARAMS = Type.Object({
 	prompt: Type.String({ description: "Image description/prompt." }),
+	imageModel: Type.Optional(
+		StringEnum(IMAGE_MODELS, {
+			description:
+				"Image model. gpt-image-2.5-flare (default) is faster everyday generation. gpt-image-2.5-sunburst is slower with tighter instruction following. gpt-image-2 is the previous model.",
+		}),
+	),
 	size: Type.Optional(StringEnum(SIZES)),
 	quality: Type.Optional(StringEnum(QUALITIES)),
 	background: Type.Optional(StringEnum(BACKGROUNDS)),
@@ -254,6 +259,9 @@ function parseImgArgs(input: string): { options: Partial<ToolParams> & { style?:
 		} else if (token === "--size" && next) {
 			options.size = next as ToolParams["size"];
 			index++;
+		} else if ((token === "--model" || token === "--image-model") && next) {
+			options.imageModel = next as ToolParams["imageModel"];
+			index++;
 		} else if (token === "--quality" && next) {
 			options.quality = next as ToolParams["quality"];
 			index++;
@@ -281,6 +289,7 @@ function applyStyle(prompt: string, options: Partial<ToolParams> & { style?: str
 	const styledPrompt = preset?.suffix ? `${prompt}. ${preset.suffix}` : prompt;
 	return {
 		prompt: styledPrompt,
+		imageModel: resolveImageModel(options.imageModel),
 		size: options.size ?? preset?.size,
 		quality: options.quality ?? preset?.quality,
 		background: options.background ?? preset?.background,
@@ -317,6 +326,7 @@ function insertImageIntoPrompt(path: string, ctx: ExtensionContext | undefined):
 }
 
 async function buildRequest(params: ToolParams, responseModel: string, sessionId: string) {
+	const imageModel = resolveImageModel(params.imageModel);
 	const size = params.size ?? "auto";
 	const quality = params.quality ?? "auto";
 	const background = params.background ?? "auto";
@@ -349,7 +359,7 @@ async function buildRequest(params: ToolParams, responseModel: string, sessionId
 			{
 				type: "image_generation",
 				background,
-				model: IMAGE_MODEL,
+				model: imageModel,
 				moderation: "auto",
 				output_compression: 100,
 				output_format: outputFormat,
@@ -441,6 +451,7 @@ async function generateImage(
 	extraMetadata: Partial<Pick<ImagegenMetadata, "batchId" | "batchPrompt" | "batchIndex" | "batchCount" | "referenceImageIds" | "referencePaths">> = {},
 ) {
 	const responseModel = ctx.model && isSubscriptionProvider(ctx.model.provider) ? ctx.model.id : DEFAULT_RESPONSE_MODEL;
+	const imageModel = resolveImageModel(params.imageModel);
 	const sessionId = randomUUID();
 	const body = await buildRequest(params, responseModel, sessionId);
 	const outputFormat = params.outputFormat ?? "png";
@@ -448,8 +459,8 @@ async function generateImage(
 
 	const { response, provider } = await requestWithSubscriptionFallback(ctx, ({ provider, token, accountId }) => {
 		onUpdate?.({
-			content: [{ type: "text", text: `Requesting image from ${provider}/${IMAGE_MODEL}...` }],
-			details: { provider, imageModel: IMAGE_MODEL, responseModel },
+			content: [{ type: "text", text: `Requesting image from ${provider}/${imageModel}...` }],
+			details: { provider, imageModel, responseModel },
 		});
 		return fetch(`${CODEX_BASE_URL}/codex/responses`, {
 			method: "POST",
@@ -480,7 +491,7 @@ async function generateImage(
 		prompt: params.prompt,
 		provider,
 		responseModel,
-		imageModel: IMAGE_MODEL,
+		imageModel,
 		imageId: image.id,
 		savedPath,
 		metadataPath,
@@ -498,7 +509,7 @@ async function generateImage(
 	const details: ImagegenDetails = metadata;
 
 	const text = [
-		`Generated image with ${provider}/${IMAGE_MODEL}.`,
+		`Generated image with ${provider}/${imageModel}.`,
 		`Saved to: ${savedPath}`,
 		image.revisedPrompt ? `Revised prompt: ${image.revisedPrompt}` : undefined,
 	]
@@ -960,7 +971,7 @@ button{font:inherit}
     <div class="brand">
       <span class="glyph">&pi;</span>
       <span class="name">Studio</span>
-      <span class="sub">gpt-image-2</span>
+      <span class="sub">gpt-image-2.5</span>
     </div>
     <nav class="seg" id="filters">
       <button class="active" data-filter="all">All</button>
@@ -1028,12 +1039,21 @@ button{font:inherit}
           <option value="1024x1536">2:3</option>
         </select>
       </label>
+      <label class="pill">model
+        <select id="imageModel" class="select">
+          <option value="gpt-image-2.5-flare" selected>flare</option>
+          <option value="gpt-image-2.5-sunburst">sunburst</option>
+          <option value="gpt-image-2">image 2</option>
+        </select>
+      </label>
       <label class="pill">quality
         <select id="quality" class="select">
           <option value="auto">auto</option>
+          <option value="low">low</option>
           <option value="medium">medium</option>
           <option value="high">high</option>
-          <option value="low">low</option>
+          <option value="xhigh">xhigh</option>
+          <option value="max">max</option>
         </select>
       </label>
       <label class="pill">thinking
@@ -1214,7 +1234,7 @@ async function startGeneration(prompt,n){
   pending+=n;render();
   setStatus('busy','Generating');
   try{
-    await api('/api/generate',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({prompt,style:$('#style').value,size:$('#size').value,quality:$('#quality').value,thinking:$('#thinking').value,count:n,references:refs.map(r=>r.imageId)})});
+    await api('/api/generate',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({prompt,style:$('#style').value,size:$('#size').value,quality:$('#quality').value,imageModel:$('#imageModel').value,thinking:$('#thinking').value,count:n,references:refs.map(r=>r.imageId)})});
   }catch(err){toast(err.message)}
   finally{pending=0;setStatus('live','Live');load()}
 }
@@ -1436,6 +1456,16 @@ export default function imagegen(pi: ExtensionAPI) {
 			if (!THINKING_MODES.includes(thinking as (typeof THINKING_MODES)[number])) {
 				return writeJson(res, 400, { ok: false, error: `Unknown thinking mode: ${thinking}` });
 			}
+			let imageModel: ToolParams["imageModel"];
+			try {
+				imageModel = resolveImageModel(body.imageModel ?? body.model);
+			} catch (error) {
+				return writeJson(res, 400, { ok: false, error: error instanceof Error ? error.message : String(error) });
+			}
+			const quality = String(body.quality ?? "auto");
+			if (!isImageQuality(quality)) {
+				return writeJson(res, 400, { ok: false, error: `Unknown quality: ${quality}` });
+			}
 			const referenceIds = Array.isArray(body.references) ? body.references.map(String).slice(0, 8) : [];
 			const references = (await Promise.all(referenceIds.map((id) => findMetadataByImageId(id)))).filter(Boolean) as ImagegenMetadata[];
 			if (!prompt && references.length === 0) return writeJson(res, 400, { ok: false, error: "Prompt or reference image is required." });
@@ -1446,8 +1476,9 @@ export default function imagegen(pi: ExtensionAPI) {
 				: {};
 			const options = {
 				style: style || undefined,
+				imageModel,
 				size: String(body.size ?? "auto") as ToolParams["size"],
-				quality: String(body.quality ?? "auto") as ToolParams["quality"],
+				quality: quality as ToolParams["quality"],
 				thinking: thinking as ToolParams["thinking"],
 				referencePaths: references.map((item) => item.savedPath),
 			};
@@ -1555,11 +1586,12 @@ export default function imagegen(pi: ExtensionAPI) {
 		name: "imagegen",
 		label: "Imagegen",
 		description:
-			"Generate an image using OpenAI Codex/ChatGPT subscription image generation (gpt-image-2). Returns an image attachment and saves it to disk.",
+			"Generate an image using OpenAI Codex/ChatGPT subscription image generation (gpt-image-2.5). Returns an image attachment and saves it to disk.",
 		promptSnippet: "Generate images via OpenAI Codex/ChatGPT subscription image generation",
 		promptGuidelines: [
 			"Use imagegen when the user asks to create, generate, draw, render, or make an image.",
 			"Use imagegen instead of writing image-generation API code when the user wants an actual generated image.",
+			"Default imageModel is gpt-image-2.5-flare. Use gpt-image-2.5-sunburst for tighter edits, gpt-image-2 only if the user asks for the previous model.",
 		],
 		parameters: TOOL_PARAMS,
 
@@ -1606,8 +1638,8 @@ export default function imagegen(pi: ExtensionAPI) {
 					customType: "imagegen-result",
 					content: [
 						"Image commands:",
-						"/img gen [--thinking off|minimal|low|medium|high] [--style name] <prompt>",
-						"/img batch <count> [--thinking off|minimal|low|medium|high] [--style name] <prompt>",
+						"/img gen [--model flare|sunburst|gpt-image-2] [--thinking off|minimal|low|medium|high] [--style name] <prompt>",
+						"/img batch <count> [--model flare|sunburst|gpt-image-2] [--thinking off|minimal|low|medium|high] [--style name] <prompt>",
 						"/img styles",
 						"/img studio",
 						"/img list [count]",
@@ -1638,7 +1670,7 @@ export default function imagegen(pi: ExtensionAPI) {
 				const parsed = parseImgArgs(rest);
 				const prompt = parsed.positional.join(" ").trim();
 				if (!prompt) {
-					ctx.ui.notify("Usage: /img gen [--style name] <prompt>", "warning");
+					ctx.ui.notify("Usage: /img gen [--model flare|sunburst] [--style name] <prompt>", "warning");
 					return;
 				}
 				if (parsed.options.style && !STYLE_PRESETS[parsed.options.style]) {
@@ -1647,6 +1679,16 @@ export default function imagegen(pi: ExtensionAPI) {
 				}
 				if (parsed.options.thinking && !THINKING_MODES.includes(parsed.options.thinking)) {
 					ctx.ui.notify(`Unknown thinking mode '${parsed.options.thinking}'.`, "warning");
+					return;
+				}
+				try {
+					parsed.options.imageModel = resolveImageModel(parsed.options.imageModel);
+				} catch (error) {
+					ctx.ui.notify(error instanceof Error ? error.message : String(error), "warning");
+					return;
+				}
+				if (parsed.options.quality && !isImageQuality(parsed.options.quality)) {
+					ctx.ui.notify(`Unknown quality '${parsed.options.quality}'.`, "warning");
 					return;
 				}
 				ctx.ui.notify("Generating image...", "info");
@@ -1678,6 +1720,16 @@ export default function imagegen(pi: ExtensionAPI) {
 				}
 				if (parsed.options.thinking && !THINKING_MODES.includes(parsed.options.thinking)) {
 					ctx.ui.notify(`Unknown thinking mode '${parsed.options.thinking}'.`, "warning");
+					return;
+				}
+				try {
+					parsed.options.imageModel = resolveImageModel(parsed.options.imageModel);
+				} catch (error) {
+					ctx.ui.notify(error instanceof Error ? error.message : String(error), "warning");
+					return;
+				}
+				if (parsed.options.quality && !isImageQuality(parsed.options.quality)) {
+					ctx.ui.notify(`Unknown quality '${parsed.options.quality}'.`, "warning");
 					return;
 				}
 				const batchId = batchDirName(prompt);

@@ -9,10 +9,12 @@
     "pi-extension",
     "image-generation",
     "codex",
-    "gpt-image-2"
+    "gpt-image-2",
+    "gpt-image-2.5"
   ],
   "files": [
     "imagegen.ts",
+    "models.ts",
     "subscriptions.ts",
     "README.md"
   ],
