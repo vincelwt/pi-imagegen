@@ -11,7 +11,7 @@ A [Pi](https://pi.dev) package for generating images with your existing OpenAI/C
 
 - Generates images through Pi's existing `openai-codex` OAuth login.
 - Falls back to other registered subscription accounts when one returns a quota limit.
-- Uses the Codex Responses backend with native GPT Image 2.5 generation (`gpt-image-2.5-flare` by default, `gpt-image-2.5-sunburst` for tighter edits).
+- Uses the Codex Responses backend with native GPT Image 2.5 generation (`gpt-image-2.5-sunburst` at high quality by default, `gpt-image-2.5-flare` for faster everyday generation).
 - Saves images and sidecar metadata locally.
 - Supports batches, style presets, reference images, and sketch references.
 - Provides a browser-based studio for browsing, comparing, rerunning, varying, and referencing images.
@@ -108,9 +108,9 @@ imagegen
 It can generate an image and return both a saved file and an inline image attachment. It supports options such as:
 
 - `prompt`
-- `imageModel` (`gpt-image-2.5-flare`, `gpt-image-2.5-sunburst`, or `gpt-image-2`)
+- `imageModel` (`gpt-image-2.5-sunburst` default, `gpt-image-2.5-flare`, or `gpt-image-2`)
 - `size`
-- `quality` (`auto`, `low`, `medium`, `high`, `xhigh`, `max`)
+- `quality` (`high` default, also `auto`, `low`, `medium`, `xhigh`, `max`)
 - `background`
 - `outputFormat`
 - `thinking`
@@ -132,7 +132,7 @@ with the native Responses image generation tool:
 ```json
 {
   "type": "image_generation",
-  "model": "gpt-image-2.5-flare"
+  "model": "gpt-image-2.5-sunburst"
 }
 ```
 

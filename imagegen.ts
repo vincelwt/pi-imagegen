@@ -3,7 +3,7 @@
  *
  * Registers `imagegen`, a custom tool that uses pi's existing openai-codex
  * OAuth credentials to call the Codex Responses backend with the native
- * `image_generation` tool (`gpt-image-2.5-flare` by default).
+ * `image_generation` tool (`gpt-image-2.5-sunburst` by default, high quality).
  */
 
 import { Buffer } from "node:buffer";
@@ -17,7 +17,7 @@ import { StringEnum } from "@mariozechner/pi-ai";
 import { type ExtensionAPI, type ExtensionContext, getAgentDir, withFileMutationQueue } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { type Static, Type } from "typebox";
-import { IMAGE_MODELS, QUALITIES, isImageQuality, resolveImageModel } from "./models.ts";
+import { DEFAULT_QUALITY, IMAGE_MODELS, QUALITIES, isImageQuality, resolveImageModel, resolveQuality } from "./models.ts";
 import { isSubscriptionProvider, requestWithSubscriptionFallback, type SubscriptionContext } from "./subscriptions.ts";
 
 const CODEX_BASE_URL = "https://chatgpt.com/backend-api";
@@ -59,11 +59,15 @@ const TOOL_PARAMS = Type.Object({
 	imageModel: Type.Optional(
 		StringEnum(IMAGE_MODELS, {
 			description:
-				"Image model. gpt-image-2.5-flare (default) is faster everyday generation. gpt-image-2.5-sunburst is slower with tighter instruction following. gpt-image-2 is the previous model.",
+				"Image model. gpt-image-2.5-sunburst (default) is slower with tighter instruction following. gpt-image-2.5-flare is faster everyday generation. gpt-image-2 is the previous model.",
 		}),
 	),
 	size: Type.Optional(StringEnum(SIZES)),
-	quality: Type.Optional(StringEnum(QUALITIES)),
+	quality: Type.Optional(
+		StringEnum(QUALITIES, {
+			description: "Image quality. Defaults to high.",
+		}),
+	),
 	background: Type.Optional(StringEnum(BACKGROUNDS)),
 	outputFormat: Type.Optional(StringEnum(OUTPUT_FORMATS)),
 	thinking: Type.Optional(
@@ -291,7 +295,7 @@ function applyStyle(prompt: string, options: Partial<ToolParams> & { style?: str
 		prompt: styledPrompt,
 		imageModel: resolveImageModel(options.imageModel),
 		size: options.size ?? preset?.size,
-		quality: options.quality ?? preset?.quality,
+		quality: options.quality ?? preset?.quality ?? DEFAULT_QUALITY,
 		background: options.background ?? preset?.background,
 		outputFormat: options.outputFormat ?? preset?.outputFormat,
 		thinking: options.thinking,
@@ -328,7 +332,7 @@ function insertImageIntoPrompt(path: string, ctx: ExtensionContext | undefined):
 async function buildRequest(params: ToolParams, responseModel: string, sessionId: string) {
 	const imageModel = resolveImageModel(params.imageModel);
 	const size = params.size ?? "auto";
-	const quality = params.quality ?? "auto";
+	const quality = params.quality ?? DEFAULT_QUALITY;
 	const background = params.background ?? "auto";
 	const outputFormat = params.outputFormat ?? "png";
 	const thinking = params.thinking ?? "low";
@@ -498,7 +502,7 @@ async function generateImage(
 		mimeType,
 		revisedPrompt: image.revisedPrompt,
 		size: params.size ?? "auto",
-		quality: params.quality ?? "auto",
+		quality: params.quality ?? DEFAULT_QUALITY,
 		background: params.background ?? "auto",
 		outputFormat,
 		thinking: params.thinking ?? "low",
@@ -1041,8 +1045,8 @@ button{font:inherit}
       </label>
       <label class="pill">model
         <select id="imageModel" class="select">
-          <option value="gpt-image-2.5-flare" selected>flare</option>
-          <option value="gpt-image-2.5-sunburst">sunburst</option>
+          <option value="gpt-image-2.5-sunburst" selected>sunburst</option>
+          <option value="gpt-image-2.5-flare">flare</option>
           <option value="gpt-image-2">image 2</option>
         </select>
       </label>
@@ -1051,7 +1055,7 @@ button{font:inherit}
           <option value="auto">auto</option>
           <option value="low">low</option>
           <option value="medium">medium</option>
-          <option value="high">high</option>
+          <option value="high" selected>high</option>
           <option value="xhigh">xhigh</option>
           <option value="max">max</option>
         </select>
@@ -1462,9 +1466,11 @@ export default function imagegen(pi: ExtensionAPI) {
 			} catch (error) {
 				return writeJson(res, 400, { ok: false, error: error instanceof Error ? error.message : String(error) });
 			}
-			const quality = String(body.quality ?? "auto");
-			if (!isImageQuality(quality)) {
-				return writeJson(res, 400, { ok: false, error: `Unknown quality: ${quality}` });
+			let quality: ToolParams["quality"];
+			try {
+				quality = resolveQuality(body.quality);
+			} catch (error) {
+				return writeJson(res, 400, { ok: false, error: error instanceof Error ? error.message : String(error) });
 			}
 			const referenceIds = Array.isArray(body.references) ? body.references.map(String).slice(0, 8) : [];
 			const references = (await Promise.all(referenceIds.map((id) => findMetadataByImageId(id)))).filter(Boolean) as ImagegenMetadata[];
@@ -1591,7 +1597,7 @@ export default function imagegen(pi: ExtensionAPI) {
 		promptGuidelines: [
 			"Use imagegen when the user asks to create, generate, draw, render, or make an image.",
 			"Use imagegen instead of writing image-generation API code when the user wants an actual generated image.",
-			"Default imageModel is gpt-image-2.5-flare. Use gpt-image-2.5-sunburst for tighter edits, gpt-image-2 only if the user asks for the previous model.",
+			"Default imageModel is gpt-image-2.5-sunburst at high quality. Use gpt-image-2.5-flare for faster everyday generation, gpt-image-2 only if the user asks for the previous model.",
 		],
 		parameters: TOOL_PARAMS,
 
